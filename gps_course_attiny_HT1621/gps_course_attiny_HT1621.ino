@@ -1,23 +1,28 @@
 #include <TinyGPSPlus.h>
 #include <SoftwareSerial.h>
 
-static const int RXPin = 0, TXPin = 3;
+#include <avr/sleep.h> //Needed for sleep_mode
+#include <avr/power.h>    // Power management
+
+static const int RXPin = 4, TXPin = 5;
 static const uint32_t GPSBaud = 9600;
 
 TinyGPSPlus gps;
 
 SoftwareSerial ss(RXPin, TXPin);
 
-//casa trieste
-//#define GPS_TARGET_LAT      45.63081080
-//#define GPS_TARGET_LNG      13.79018556
-//casa mels
-#define GPS_TARGET_LAT      46.17725965
-#define GPS_TARGET_LNG      13.11714012
+const byte SWITCH = 3; // pin 3 / PCINT4
 
-#define CS	 4  //Pin 13 as chip selection output
-#define WR	 2  //Pin 12 as read clock	output
-#define DATA 1	//Pin 7 as Serial data output
+//casa trieste
+#define GPS_TARGET_LAT      45.63081080
+#define GPS_TARGET_LNG      13.79018556
+//casa mels
+//#define GPS_TARGET_LAT      46.17725965
+//#define GPS_TARGET_LNG      13.11714012
+
+#define CS	 2  //Pin 13 as chip selection output
+#define WR	 1  //Pin 12 as read clock	output
+#define DATA 0	//Pin 7 as Serial data output
  
 #define CS1    digitalWrite(CS, HIGH)
 #define CS0    digitalWrite(CS, LOW)
@@ -42,6 +47,8 @@ SoftwareSerial ss(RXPin, TXPin);
 //                0     1     2     3     4     5     6     7     8     9
 const char num[]={0x3f, 0x09, 0x67, 0x4f, 0x59, 0x5e, 0x7e, 0x0b, 0x7f, 0x5f};
 
+char wait[] = {0x10,0x02,0x01,0x40,0x20,0x04,0x08,0x40};
+char wait2[] = {0x10,0x10,0x10,0x02,0x02,0x02,0x01,0x01,0x01,0x08,0x08,0x08,0x04,0x04,0x04,0x20,0x20,0x20};
 
 void SendBit_1621(uchar sdata,uchar cnt)
 {
@@ -94,15 +101,19 @@ void Init_1621(void)
 	SendCmd_1621(LCD_on);
 }
 
-void draw_n(int n){
+void draw_degree(int n){
   if(n < 1)
     draw(0,0,0,0);
-  if(n >= 0 && n < 10)
-    draw(0,0,0,num[n]);
-  if(n >= 10 && n < 100)
-    draw(0,0,num[(n / 10 % 10)],num[(n % 10)]);
-  if(n >= 100 && n < 1000)
-    draw(0,num[(n / 100 % 10)],num[(n /10 % 10)],num[(n% 10)]);
+  else if(n >= 0 && n < 10)
+    draw(0,0,num[n],0x80);
+  else if(n >= 10 && n < 100)
+    draw(0,num[(n / 10 % 10)],num[(n % 10)],0x80);
+  else
+    draw(num[(n / 100 % 10)],num[(n /10 % 10)],num[(n% 10)],0x80);
+}
+
+void draw_m(int n){
+  draw(0,num[(n / 100 % 10)],num[(n /10 % 10)],num[(n% 10)]);
 }
 
 void draw(uint8_t dig1, uint8_t dig2, uint8_t dig3, uint8_t dig4){
@@ -139,6 +150,9 @@ void draw(uint8_t dig1, uint8_t dig2, uint8_t dig3, uint8_t dig4){
 void setup() {
   ss.begin(GPSBaud);
 
+  pinMode (SWITCH, INPUT);
+  digitalWrite (SWITCH, HIGH);  // internal pull-up
+
   pinMode(CS, OUTPUT);
   pinMode(WR, OUTPUT);
   pinMode(DATA, OUTPUT);
@@ -149,9 +163,29 @@ void setup() {
   //HT1621_all_off(16); //1621
 }
 
+bool showCourse = true;
+//uint8_t i = 0;
+
 void loop() {
+  
   while (ss.available() > 0)
     if (gps.encode(ss.read()))
-      draw_n(TinyGPSPlus::courseTo(gps.location.lat(), gps.location.lng(), GPS_TARGET_LAT, GPS_TARGET_LNG));
-
+      if(gps.location.isValid()){
+        if(digitalRead(SWITCH) == LOW)
+          showCourse = !showCourse;
+        if(showCourse)
+          draw_degree(TinyGPSPlus::courseTo(gps.location.lat(), gps.location.lng(), GPS_TARGET_LAT, GPS_TARGET_LNG));
+        else{
+          double dist = TinyGPSPlus::distanceBetween(gps.location.lat(), gps.location.lng(), GPS_TARGET_LAT, GPS_TARGET_LNG);
+          if(dist > 999)
+            dist = dist/1000;
+          draw_m(dist);
+        }
+      }else{
+        draw(0,0x3E,0x73,0x5E);
+        //i++;
+        //if(i == 18)
+        //  i = 0;
+      }
+    
 }
